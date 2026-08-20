@@ -1,5 +1,4 @@
----
-title: "LATIHAN AJAA"
-output: html_document
----
+```{r}
+Haikalganteng<-c(1,2,3)
+```
 
