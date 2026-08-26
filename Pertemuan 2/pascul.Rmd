@@ -1,6 +1,0 @@
----
-title: "pascul"
-output: html_document
----
-
-bdjsafkndaslkn
