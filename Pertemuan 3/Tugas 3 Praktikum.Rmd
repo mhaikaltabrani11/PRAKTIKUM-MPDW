@@ -1,0 +1,449 @@
+---
+title: "Handson Pertemuan 3"
+author: "M. Haikal Tabrani M0401241060"
+date: "2026-09-04"
+output: 
+  rmdformats::readthedown
+---
+
+# I. Import Library
+
+Memuat seluruh library R yang dibutuhkan untuk pemodelan Distributed Lag (Koyck, Ad-hoc DLM, dan ARDL), evaluasi akurasi peramalan, uji asumsi, serta manipulasi data.
+
+```{r message=FALSE, warning=FALSE}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+library(readxl)
+library(dplyr)
+```
+
+
+# II. Casse I
+
+## a. Read Dataset
+
+```{r}
+df1 <- read_excel("C:\\Users\\a c e r\\Music\\SEMESTER 5\\KULIAH\\MPDW\\PRAKTIKUM\\PERTEMUAN 3\\DATA1.xlsx")
+df1
+```
+
+## b. Pre-processing
+
+Melakukan pembersihan data dengan menghapus kolom Period serta mengubah nama variabel Market share menjadi $Y_t$ (variabel respon) dan Price menjadi $X_t$ (variabel penjelas).
+
+```{r}
+data1 <- df1 %>%
+  select(-Period) %>%
+  rename(Yt = `Market share`, 
+         Xt = Price)
+```
+
+## c. Data Split
+
+Membagi data Kasus I menjadi data latih (training set) sebanyak 16 observasi pertama dan data uji (testing set) sebanyak 4 observasi terakhir.
+
+```{r}
+train1<-data1[1:16,]
+test1<-data1[17:20,]
+```
+
+Mengubah format data latih, data uji, dan data keseluruhan ke dalam objek time series (ts).
+
+```{r}
+train1.ts<-ts(train1)
+test1.ts<-ts(test1)
+data1.ts<-ts(data1)
+```
+
+## d. Metode Koyck
+
+Membentuk model Distributed Lag menggunakan pendekatan Koyck berdasarkan data latih, dilanjutkan dengan menampilkan ringkasan statistik serta nilai AIC dan BIC model.
+
+```{r}
+model.koyck <- koyckDlm(x = train1$Xt, y = train1$Yt)
+summary(model.koyck)
+AIC(model.koyck)
+BIC(model.koyck)
+```
+
+Berdasarkan estimasi model Koyck, diperoleh persamaan regresi $\hat{Y}_t = 14.1547 + 0.4356 Y_{t-1} - 12.4022 X_t$. Nilai koefisien $X_t$ sebesar $-12.4022$ menunjukkan bahwa setiap kenaikan satu unit harga akan menurunkan market share sebesar $12.4022$ unit secara langsung. Sementara itu, koefisien $Y_{t-1}$ sebesar $0.4356$ menggambarkan pengaruh market share periode sebelumnya terhadap periode berjalan sekaligus menandakan tingkat penurunan pengaruh lag secara geometris.
+
+Secara simultan, variabel $Y_{t-1}$ dan $X_t$ berpengaruh signifikan terhadap $Y_t$ (Wald Test, $p\text{-value} < 0.05$) dengan kemampuan menjelaskan keragaman market share sebesar 90,13% ($R^2 = 0.9013$). Namun secara parsial, baik harga maupun market share periode sebelumnya tidak berpengaruh signifikan pada taraf nyata 5% ($p\text{-value} > 0.05$). Adapun nilai kebaikan model ditunjukkan oleh AIC sebesar $32.95$ dan BIC sebesar $35.78$.
+
+
+Melakukan peramalan untuk 4 periode ke depan menggunakan model Koyck, menghitung nilai akurasi MAPE pada data uji.
+
+```{r}
+fore.koyck <- forecast(model = model.koyck, x=test1$Xt, h=4)
+fore.koyck
+mape.koyck <- MAPE(fore.koyck$forecasts, test1$Yt)
+mape.koyck
+```
+
+Hasil peramalan model Koyck untuk empat periode ke depan menghasilkan nilai ramalan market share berturut-turut sebesar 7,47, 7,61, 8,05, dan 7,99. Evaluasi akurasi menunjukkan nilai MAPE sebesar 0,0387 (atau 3,87%). Karena nilai MAPE jauh di bawah 10%, model Koyck ini memiliki tingkat akurasi yang sangat baik dalam memprediksi market share pada data uji.
+
+## e. Metode Ad Hoc
+
+Membentuk model Distributed Lag menggunakan metode Ad Hoc dengan menentukan panjang lag awal $q = 2$, lalu menampilkan ringkasan model, AIC, dan BIC.
+
+```{r}
+model.dlm <- dlm(x = train1$Xt,y = train1$Yt , q = 2)
+summary(model.dlm)
+AIC(model.dlm)
+BIC(model.dlm)
+```
+
+Berdasarkan estimasi model Ad-Hoc DLM ($q = 2$), diperoleh persamaan regresi $\hat{Y}_t = 27.690 - 20.911 X_t - 1.384 X_{t-1} - 2.930 X_{t-2}$. Hasil ini menunjukkan bahwa harga periode berjalan ($X_t$) berpengaruh negatif signifikan terhadap market share ($p\text{-value} = 0.000459 < 0.05$), di mana setiap kenaikan 1 unit harga periode berjalan akan menurunkan market share sebesar $20.911$ unit. Sebaliknya, peubah harga pada lag-1 ($X_{t-1}$) dan lag-2 ($X_{t-2}$) secara parsial tidak berpengaruh signifikan ($p\text{-value} > 0.05$).
+
+Secara simultan, peubah $X_t$, $X_{t-1}$, dan $X_{t-2}$ berpengaruh signifikan terhadap $Y_t$ (Uji F, $p\text{-value} = 1.255 \times 10^{-6} < 0.05$) dengan koefisien determinasi ($R^2$) sebesar $0.9456$, yang berarti $94,56\%$ keragaman market share mampu dijelaskan oleh model. Adapun tingkat kebaikan model ini ditunjukkan oleh nilai AIC sebesar $24.91$ dan BIC sebesar $28.10$.
+
+
+Melakukan peramalan 4 periode ke depan dengan model Ad Hoc ($q = 2$), menghitung nilai MAPE pada data uji, serta mengevaluasi Goodness of Fit.
+
+```{r}
+fore.dlm <- forecast(model = model.dlm, x=test1$Xt, h=4)
+fore.dlm
+mape.dlm <- MAPE(fore.dlm$forecasts, test1$Yt)
+mape.dlm
+```
+
+Hasil peramalan menggunakan model Ad-Hoc DLM ($q = 2$) untuk empat periode ke depan menghasilkan nilai dugaan market share berturut-turut sebesar 7,00, 7,68, 8,27, dan 8,01. Evaluasi akurasi peramalan pada data uji menghasilkan nilai MAPE sebesar 0,0251 (atau 2,51%). Nilai MAPE yang berada di bawah 10% mengindikasikan bahwa model Ad-Hoc DLM ($q = 2$) memiliki kemampuan peramalan dengan tingkat akurasi yang sangat baik (sangat presisi).
+
+
+Mencari panjang lag $q$ optimum untuk metode Ad Hoc dalam rentang $q \in [1, 10]$ berdasarkan kriteria kebaikan model minimum AIC.
+
+```{r}
+finiteDLMauto(formula = Yt ~ Xt,
+              data = data.frame(train1), q.min = 1, q.max = 10,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+Proses penentuan $lag$ optimum dengan fungsi finiteDLMauto() mengevaluasi nilai $q$ dari $1$ hingga $10$ berdasarkan kriteria AIC minimum. Hasil pencarian menunjukkan bahwa untuk $q \ge 7$, model mengalami overfitting atau kekurangan derajat bebas sehingga menghasilkan nilai AIC/BIC $-\infty$ dan $R^2_{\text{adj}}$ bernilai NaN. Oleh karena itu, kandidat $lag$ valid terbaik diperoleh pada $q = 6$ dengan nilai AIC terkecil sebesar 1,98713 (serta nilai MASE 0,13287 dan $R^2_{\text{adj}}$ sebesar 0,96533). Dengan demikian, $lag$ optimum yang terpilih untuk model Ad-Hoc DLM adalah $q = 6$.
+
+
+Membentuk ulang model Ad Hoc menggunakan panjang lag optimum yang telah didapatkan ($q = 6$), lalu menampilkan ringkasan statistik, nilai AIC, dan BIC model.
+
+```{r}
+model.dlm2 <- dlm(x = train1$Xt, y = train1$Yt, q = 6)
+summary(model.dlm2)
+AIC(model.dlm2)
+BIC(model.dlm2)
+```
+
+Berdasarkan estimasi model Ad-Hoc DLM optimum ($q = 6$), diperoleh persamaan regresi $\hat{Y}_t = 39.6104 - 44.9998 X_t - 0.0039 X_{t-1} - 0.7549 X_{t-2} + 2.6130 X_{t-3} + 20.8662 X_{t-4} - 0.2260 X_{t-5} - 2.8988 X_{t-6}$. Hasil pengujian parsial menunjukkan bahwa variabel harga periode berjalan ($X_t$) berpengaruh negatif dan signifikan terhadap market share pada taraf nyata 5% ($p\text{-value} = 0.01624 < 0.05$), di mana setiap kenaikan 1 unit harga periode berjalan akan menurunkan market share sebesar $44.9998$ unit. Sementara itu, peubah $X_{t-4}$ berpengaruh signifikan pada taraf nyata 10% ($p\text{-value} = 0.05182$), sedangkan peubah $lag$ lainnya secara parsial tidak berpengaruh signifikan ($p\text{-value} > 0.05$). Kebaikan model ini ditunjukkan oleh nilai AIC yang sangat rendah yaitu sebesar $1.9871$ dan BIC sebesar $4.7104$.
+
+
+Melakukan peramalan 4 periode ke depan menggunakan model Ad Hoc optimum ($q = 6$), menghitung nilai MAPE pada data uji, serta menampilkan Goodness of Fit.
+
+```{r}
+fore.dlm2 <- forecast(model = model.dlm2, x=test1$Xt, h=4)
+mape.dlm2<- MAPE(fore.dlm2$forecasts, test1$Yt)
+mape.dlm2
+```
+
+Evaluasi akurasi peramalan empat periode ke depan menggunakan model Ad-Hoc DLM optimum ($q = 6$) menghasilkan nilai MAPE sebesar 0,0790 (atau 7,90%). Nilai MAPE yang berada di bawah 10% mengindikasikan bahwa model Ad-Hoc DLM optimum ini memiliki kemampuan dan presisi peramalan yang sangat baik pada data uji.
+
+
+## f. Metode ARDL
+
+Membentuk model Autoregressive Distributed Lag (ARDL) awal dengan orde $p = 1$ dan $q = 1$ menggunakan masukan vektor data latih.
+
+```{r}
+model.ardl <- ardlDlm(x = train1$Xt, y = train1$Yt, p = 1 , q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+Berdasarkan estimasi model Autoregressive Distributed Lag (ARDL) dengan orde $p = 1$ dan $q = 1$, diperoleh persamaan regresi $\hat{Y}_t = 16.0526 - 22.3164 X_t + 7.6883 X_{t-1} + 0.4233 Y_{t-1}$. Hasil uji parsial menunjukkan bahwa peubah harga periode berjalan ($X_t$) berpengaruh negatif dan sangat signifikan terhadap market share pada taraf nyata 1% ($p\text{-value} = 1.7 \times 10^{-5} < 0.01$), di mana setiap kenaikan 1 unit harga periode berjalan menurunkan market share sebesar $22.3164$ unit. Sementara itu, peubah $X_{t-1}$ dan $Y_{t-1}$ secara parsial tidak berpengaruh signifikan ($p\text{-value} > 0.05$).
+
+
+Membentuk kembali model ARDL (1,1) menggunakan pendekatan spesifikasi formula Yt ~ Xt pada data latih.
+
+```{r}
+model.ardl <- ardlDlm(formula = Yt ~ Xt, 
+                         data = train1,p = 1 , q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+Berdasarkan hasil estimasi model ARDL ($p = 1, q = 1$) dengan pendekatan formula Yt ~ Xt, diperoleh persamaan regresi $\hat{Y}_t = 16.0526 - 22.3164 X_t + 7.6883 X_{t-1} + 0.4233 Y_{t-1}$. Hasil pengujian parsial menunjukkan bahwa variabel harga periode berjalan ($X_t$) berpengaruh negatif dan sangat signifikan terhadap market share pada taraf nyata 1% ($p\text{-value} = 1.7 \times 10^{-5} < 0.01$), di mana setiap kenaikan 1 unit harga periode berjalan akan menurunkan market share sebesar $22.3164$ unit. Sementara itu, peubah $X_{t-1}$ ($p\text{-value} = 0.3612$) dan $Y_{t-1}$ ($p\text{-value} = 0.2249$) secara parsial tidak berpengaruh signifikan pada taraf nyata 5%.
+
+Secara simultan, seluruh peubah penjelas berpengaruh signifikan terhadap market share (Uji F, $p\text{-value} = 2.147 \times 10^{-7} < 0.05$) dengan nilai $R^2 = 0.9490$, yang menunjukkan bahwa $94,90\%$ keragaman market share mampu dijelaskan oleh model ini. Kebaikan model ditunjukkan oleh nilai AIC sebesar $25.0363$ dan BIC sebesar $28.5765$.
+
+
+Melakukan peramalan 4 periode ke depan menggunakan model ARDL (1,1) yang telah terbentuk.
+
+```{r}
+fore.ardl <- forecast(model = model.ardl, x=test1$Xt, h=4)
+fore.ardl
+```
+
+Hasil peramalan menggunakan model Autoregressive Distributed Lag (ARDL) dengan orde $p = 1$ dan $q = 1$ untuk empat periode ke depan menghasilkan nilai dugaan market share berturut-turut sebesar 7,19, 7,85, 8,49, dan 8,08.
+
+
+Menghitung tingkat akurasi peramalan model ARDL (1,1) menggunakan metrik MAPE serta menampilkan evaluasi kriteria kebaikan model (Goodness of Fit).
+
+```{r}
+mape.ardl <- MAPE(fore.ardl$forecasts, test1$Yt)
+mape.ardl
+```
+
+Evaluasi akurasi peramalan empat periode ke depan menggunakan model ARDL ($p = 1, q = 1$) menghasilkan nilai MAPE sebesar 0,0076 (atau 0,76%). Nilai MAPE yang jauh di bawah 10% ini mengindikasikan bahwa model ARDL (1,1) memiliki kemampuan dan presisi peramalan yang sangat tinggi (sangat presisi) pada data uji.
+
+
+Melakukan pencarian kombinasi orde $p$ dan $q$ optimum untuk model ARDL menggunakan batas maksimum $p = 3$ dan $q = 3$ berdasarkan nilai AIC terkecil.
+
+```{r}
+model.ardl.opt <- ardlBoundOrders(data = data.frame(train1), ic = "AIC", 
+                                  formula = Yt ~ Xt, max.p = 3, max.q = 3)
+model.ardl.opt
+min_p=c()
+for(i in 1:3){
+  min_p[i]=min(model.ardl.opt$Stat.table[[i]], na.rm = TRUE)
+}
+q_opt=which(min_p==min(min_p, na.rm = TRUE))
+p_opt=which(model.ardl.opt$Stat.table[[q_opt]] == 
+              min(model.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt, 
+           "AIC"=model.ardl.opt$min.Stat)
+```
+
+Membentuk model ARDL optimum berdasarkan pasangan orde ($p_{\text{opt}}, q_{\text{opt}}$) yang diperoleh dari proses pencarian sebelumnya.
+
+```{r}
+model.ardl2 <- ardlDlm(formula = Yt ~ Xt, data = train1, p = p_opt, q = q_opt)
+summary(model.ardl2)
+AIC(model.ardl2)
+BIC(model.ardl2)
+```
+
+Berdasarkan estimasi model ARDL optimum ($p = 2, q = 2$), diperoleh persamaan regresi $\hat{Y}_t = 25.3957 - 16.4444 X_t + 10.7658 X_{t-1} - 17.2411 X_{t-2} + 0.5738 Y_{t-1} - 0.5062 Y_{t-2}$. Hasil pengujian parsial menunjukkan bahwa peubah harga periode berjalan ($X_t$) berpengaruh negatif dan signifikan terhadap market share pada taraf nyata 5% ($p\text{-value} = 0.0243 < 0.05$), di mana setiap kenaikan 1 unit harga periode berjalan akan menurunkan market share sebesar $16.4444$ unit. Sementara itu, peubah $X_{t-1}$, $X_{t-2}$, $Y_{t-1}$, dan $Y_{t-2}$ secara parsial tidak berpengaruh signifikan ($p\text{-value} > 0.05$).
+
+Secara simultan, seluruh peubah penjelas berpengaruh signifikan terhadap market share (Uji F, $p\text{-value} = 2.884 \times 10^{-5} < 0.05$) dengan nilai $R^2 = 0.9572$ dan $R^2_{\text{adj}} = 0.9304$, yang menunjukkan bahwa $95,72\%$ keragaman market share mampu dijelaskan oleh model ARDL (2,2). Kebaikan model ini ditunjukkan oleh nilai AIC sebesar $25.5751$ dan BIC sebesar $30.0485$.
+
+
+Melakukan peramalan 4 periode ke depan dengan menggunakan model ARDL optimum.
+
+```{r}
+fore.ardl2 <- forecast(model = model.ardl2, x = test1$Xt, h = 4)
+fore.ardl2
+```
+
+Hasil peramalan menggunakan model ARDL optimum ($p = 2, q = 2$) untuk empat periode ke depan menghasilkan nilai dugaan market share berturut-turut sebesar 7,75, 7,80, 7,65, dan 7,57.
+
+
+Menghitung nilai MAPE dari hasil ramalan model ARDL optimum terhadap data uji dan mengevaluasi Goodness of Fit model.
+
+```{r}
+mape.ardl2 <- MAPE(fore.ardl2$forecasts, test1$Yt)
+mape.ardl2
+```
+
+Evaluasi akurasi peramalan empat periode ke depan menggunakan model ARDL optimum ($p = 2, q = 2$) menghasilkan nilai MAPE sebesar 0,0668 (atau 6,68%). Nilai MAPE yang berada di bawah 10% ini mengindikasikan bahwa model ARDL (2,2) memiliki kemampuan dan presisi peramalan yang sangat baik (sangat presisi) pada data uji.
+
+## g. Perbandingan Metode
+
+Menggabungkan seluruh nilai MAPE dari kelima metode yang telah dicoba ke dalam matriks perbandingan akurasi peramalan.
+
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.dlm2, mape.ardl, mape.ardl2))
+row.names(akurasi) <- c("Koyck", "Ad-Hoc (q=2)", "Ad-Hoc Optimum (q=6)", 
+                       "Autoregressive (p=1, q=1)", "Autoregressive Optimum")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+
+Seluruh model menghasilkan nilai MAPE di bawah 10%, yang mengindikasikan tingkat akurasi peramalan yang sangat presisi. Model Autoregressive Distributed Lag ($p=1, q=1$) terpilih sebagai model terbaik karena menghasilkan tingkat kesalahan peramalan terkecil dengan nilai MAPE sebesar 0,0076 (atau 0,76%).
+
+
+Visualisasi perbandingan pergerakan nilai aktual $Y_t$ pada data uji terhadap hasil ramalan dari seluruh metode yang diuji.
+
+```{r}
+par(mfrow=c(1,1))
+
+plot(test1$Xt, test1$Yt, type="b", col="black", ylim=c(6,11))
+
+points(test1$Xt, fore.koyck$forecasts, col="red");   lines(test1$Xt, fore.koyck$forecasts, col="red")
+points(test1$Xt, fore.dlm$forecasts, col="blue");    lines(test1$Xt, fore.dlm$forecasts, col="blue")
+points(test1$Xt, fore.dlm2$forecasts, col="orange"); lines(test1$Xt, fore.dlm2$forecasts, col="orange")
+points(test1$Xt, fore.ardl$forecasts, col="green");  lines(test1$Xt, fore.ardl$forecasts, col="green")
+points(test1$Xt, fore.ardl2$forecasts, col="purple"); lines(test1$Xt, fore.ardl2$forecasts, col="purple")
+
+legend("topleft",
+       c("Aktual", "Koyck","Ad-Hoc","Ad-Hoc Optimum", "Autoregressive (1,1)", "ARDL Optimum"),
+       lty=1, col=c("black","red","blue","orange","green","purple"), cex=0.8)
+```
+
+Berdasarkan plot perbandingan nilai aktual dan hasil ramalan dari kelima model (Koyck, Ad-Hoc DLM, Ad-Hoc Optimum, Autoregressive (1,1), dan ARDL Optimum) pada data uji:
+
+1. Garis hijau yang mewakili model Autoregressive (1,1) berimpit paling mendekati garis hitam (data aktual $\text{test1}\$Y_t$) di sepanjang seluruh titik pengamatan peubah $\text{test1}\$X_t$.
+
+2. Model Autoregressive (1,1) mampu mengikuti tren dan fluktuasi data aktual market share secara konsisten dibandingkan model lainnya.
+
+3. Plot visual ini memperkuat temuan evaluasi MAPE sebelumnya, yang mengonfirmasi bahwa Autoregressive Distributed Lag (1,1) merupakan model terbaik dengan tingkat presisi dan akurasi peramalan paling tinggi untuk data uji.
+
+
+# III. Kasus II
+
+## a. Read Dataset
+
+```{r}
+df2 <- read_excel("C:\\Users\\a c e r\\Music\\SEMESTER 5\\KULIAH\\MPDW\\PRAKTIKUM\\PERTEMUAN 3\\DATA2.xlsx")
+df2
+```
+
+## b. Pre-processing Data
+
+Menghapus kolom Year serta melakukan pembentukan variabel $Y_t$ untuk Sales dan $X_t$ untuk Advertising.
+
+```{r}
+data2 <- df2 %>%
+  select(-Year) %>%
+  rename(Yt = Sales, 
+         Xt = Advertising)
+```
+
+## c. Data Split
+
+Membagi dataset Kasus II menjadi data latih (32 observasi pertama) dan data uji (8 observasi terakhir), lalu mengonversinya ke format time series.
+
+```{r}
+train2 <- data2[1:32, ]
+test2  <- data2[33:40, ]
+
+train2.ts <- ts(train2)
+test2.ts  <- ts(test2)
+data2.ts  <- ts(data2)
+```
+
+## d. Model ARDL
+
+Membentuk model ARDL (1,1) awal untuk Kasus II pada data latih, kemudian menampilkan ringkasan parameter model, AIC, dan BIC.
+
+```{r}
+model.ardl_no2 <- ardlDlm(formula = Yt ~ Xt, data = train2, p = 1, q = 1)
+summary(model.ardl_no2)
+AIC(model.ardl_no2)
+BIC(model.ardl_no2)
+```
+
+Berdasarkan estimasi model Autoregressive Distributed Lag (ARDL) dengan $p = 1$ dan $q = 1$ pada dataset kedua (train2), diperoleh persamaan regresi $\hat{Y}_t = 1.3030 + 0.3084 X_t - 0.2064 X_{t-1} + 0.8395 Y_{t-1}$. Hasil pengujian parsial menunjukkan bahwa peubah $Y_{t-1}$ berpengaruh positif dan sangat signifikan terhadap $Y_t$ pada taraf nyata 1% ($p\text{-value} = 5.2 \times 10^{-9} < 0.01$). Peubah $X_t$ berpengaruh positif dan signifikan pada taraf nyata 10% ($p\text{-value} = 0.0578$), sedangkan peubah $X_{t-1}$ secara parsial tidak berpengaruh signifikan ($p\text{-value} = 0.2453$).
+
+Secara simultan, seluruh peubah penjelas berpengaruh sangat signifikan terhadap $Y_t$ (Uji F, $p\text{-value} < 2.2 \times 10^{-16}$) dengan nilai $R^2 = 0.9943$ dan $R^2_{\text{adj}} = 0.9937$, yang berarti $99,43\%$ keragaman variabel respon mampu dijelaskan oleh model ARDL (1,1). Kebaikan model ini ditunjukkan oleh nilai AIC sebesar $-12.9374$ dan BIC sebesar $-5.7674$.
+
+
+Melakukan peramalan nilai penjualan ($Y_t$) untuk 8 periode ke depan berdasarkan data uji biaya promosi ($X_t$).
+
+```{r}
+fore.ardl_no2 <- forecast(model = model.ardl_no2, x = test2$Xt, h = 8)
+fore.ardl_no2
+```
+
+Hasil peramalan menggunakan model Autoregressive Distributed Lag (ARDL) dengan $p = 1$ dan $q = 1$ pada dataset kedua (model.ardl_no2) untuk delapan periode ke depan ($h = 8$) menghasilkan nilai dugaan berturut-turut sebesar 19,53, 19,90, 20,05, 20,27, 20,42, 20,71, 20,99, dan 21,30.
+
+
+Menghitung tingkat kesalahan peramalan MAPE dari model ARDL (1,1) pada data uji Kasus II serta menampilkan Goodness of Fit.
+
+```{r}
+mape.ardl_no2 <- MAPE(fore.ardl_no2$forecasts, test2$Yt)
+mape.ardl_no2
+```
+
+Evaluasi akurasi peramalan delapan periode ke depan ($h = 8$) menggunakan model ARDL ($p = 1, q = 1$) pada dataset kedua (model.ardl_no2) menghasilkan nilai MAPE sebesar 0,0191 (atau 1,91%). Nilai MAPE yang jauh di bawah 10% ini mengindikasikan bahwa model ARDL (1,1) memiliki kemampuan dan presisi peramalan yang sangat tinggi (sangat presisi) pada data uji kasus kedua.
+
+
+Melakukan pencarian kombinasi orde $p$ dan $q$ optimum untuk Kasus II berdasarkan nilai statistik kriteria informasi terendah (AIC).
+
+```{r}
+model.ardl.opt_no2 <- ardlBoundOrders(data = data.frame(train2), ic = "AIC", 
+                                      formula = Yt ~ Xt)
+model.ardl.opt_no2
+
+min_p_no2 <- c()
+for(i in 1:length(model.ardl.opt_no2$Stat.table)){
+  min_p_no2[i] <- min(model.ardl.opt_no2$Stat.table[[i]], na.rm = TRUE)
+}
+
+q_opt_no2 <- which(min_p_no2 == min(min_p_no2, na.rm = TRUE))
+p_opt_no2 <- which(model.ardl.opt_no2$Stat.table[[q_opt_no2]] == 
+                   min(model.ardl.opt_no2$Stat.table[[q_opt_no2]], na.rm = TRUE))
+
+data.frame("q_optimum" = q_opt_no2, "p_optimum" = p_opt_no2, 
+           "AIC" = model.ardl.opt_no2$min.Stat)
+```
+
+Membentuk model ARDL optimum untuk Kasus II menggunakan kombinasi orde $p$ dan $q$ terbaik yang telah teridentifikasi.
+
+```{r}
+model.ardl.optimum_no2 <- ardlDlm(formula = Yt ~ Xt, data = train2, 
+                                  p = p_opt_no2, q = q_opt_no2)
+summary(model.ardl.optimum_no2)
+AIC(model.ardl.optimum_no2)
+BIC(model.ardl.optimum_no2)
+```
+
+Melakukan peramalan 8 periode ke depan menggunakan model ARDL optimum pada Kasus II.
+
+```{r}
+fore.ardl.optimum_no2 <- forecast(model = model.ardl.optimum_no2, x = test2$Xt, h = 8)
+fore.ardl.optimum_no2
+```
+
+Hasil peramalan menggunakan model ARDL optimum ($p = 9, q = 8$) pada dataset kedua (model.ardl.optimum_no2) untuk delapan periode ke depan ($h = 8$) menghasilkan nilai dugaan berturut-turut sebesar 19,58, 19,62, 19,01, 19,42, 19,65, 19,75, 19,87, dan 19,98.
+
+
+Menghitung akurasi MAPE pada data uji dan menampilkan ringkasan kelayakan model (Goodness of Fit) untuk ARDL optimum.
+
+```{r}
+mape.ardl.optimum_no2 <- MAPE(fore.ardl.optimum_no2$forecasts, test2$Yt)
+mape.ardl.optimum_no2
+```
+
+Evaluasi akurasi peramalan delapan periode ke depan ($h = 8$) menggunakan model ARDL optimum ($p = 9, q = 8$) pada dataset kedua (model.ardl.optimum_no2) menghasilkan nilai MAPE sebesar 0,0222 (atau 2,22%). Nilai MAPE yang berada jauh di bawah 10% mengindikasikan bahwa model ARDL (9,8) memiliki kemampuan dan presisi peramalan yang sangat tinggi (sangat presisi) pada data uji.
+
+
+Menyajikan perbandingan tingkat akurasi MAPE antara model ARDL (1,1) dan model ARDL optimum untuk Kasus II dalam bentuk matriks.
+
+```{r}
+akurasi_no2 <- matrix(c(mape.ardl_no2, mape.ardl.optimum_no2))
+row.names(akurasi_no2) <- c("Autoregressive (p=1, q=1)", "Autoregressive Optimum")
+colnames(akurasi_no2) <- c("MAPE")
+akurasi_no2
+```
+
+Kedua model menghasilkan nilai MAPE di bawah 10%, yang mengindikasikan bahwa keduanya memiliki kemampuan peramalan yang sangat presisi pada data uji. Model Autoregressive ($p=1, q=1$) terpilih sebagai model terbaik untuk dataset kedua karena menghasilkan nilai MAPE yang lebih kecil ($1,91\%$) serta memiliki struktur model yang jauh lebih parsimoni (sederhana) dibandingkan model ARDL Optimum.
+
+
+Membuat plot perbandingan antara nilai penjualan aktual ($Y_t$) pada periode pengujian (33–40) dengan hasil ramalan dari model ARDL (1,1) dan ARDL optimum.
+
+```{r}
+par(mfrow = c(1, 1))
+
+periode_test2 <- 33:40
+
+plot(periode_test2, test2$Yt, type = "b", col = "black", 
+     ylim = range(c(test2$Yt, fore.ardl_no2$forecasts, fore.ardl.optimum_no2$forecasts)),
+     xlab = "Periode (Tahun)", ylab = "Sales (Yt)",
+     main = "Perbandingan Hasil Ramalan ARDL (Soal 2)")
+
+lines(periode_test2, fore.ardl_no2$forecasts, col = "green", type = "b", pch = 2)
+lines(periode_test2, fore.ardl.optimum_no2$forecasts, col = "purple", type = "b", pch = 3)
+
+legend("topleft", 
+       legend = c("Aktual", "ARDL (1,1)", "ARDL Optimum"),
+       col = c("black", "green", "purple"), 
+       lty = 1, pch = 1:3, cex = 0.8)
+```
+
+Berdasarkan plot perbandingan nilai aktual dan hasil ramalan kedua model ARDL pada dataset kasus kedua (periode 33–40):
+
+1. Garis hijau yang mewakili model ARDL (1,1) secara umum mengikuti pola tren peningkatan (upward trend) dari data aktual $\text{test2}\$Y_t$ (garis hitam) dengan penyimpangan yang sangat kecil di sepanjang periode pengamatan.
+
+2. Garis ungu mewakili model ARDL Optimum (9,8) cenderung mengalami penurunan yang cukup tajam pada periode 35 dan meramal lebih rendah (underestimate) dari nilai aktual pada sebagian besar periode.
+
+3. Visualisasi ini memperkuat hasil evaluasi nilai MAPE sebelumnya, di mana model ARDL (1,1) terbukti memberikan hasil ramalan yang paling mendekati data penjualan aktual (Sales) dengan nilai error yang lebih rendah (MAPE $1,91\%$).
